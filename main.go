@@ -1,1 +1,5 @@
-package kilid
+package main
+
+func main() {
+
+}
