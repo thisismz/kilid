@@ -3,43 +3,63 @@ package sezar
 import (
 	"bytes"
 	"fmt"
+	"io"
+	"os"
 
 	"github.com/ProtonMail/go-crypto/openpgp"
 )
 
-// encryptBytes takes an armored public key and a plaintext message,
-// returning the encrypted ciphertext.
-func EncryptBytes(publicKeyBytes []byte, plaintext []byte) ([]byte, error) {
-	// 1. Read the public key
-	entityList, err := openpgp.ReadArmoredKeyRing(bytes.NewReader(publicKeyBytes))
+func EncryptBytes(publicKeyBytes []byte, inputPath string, outputPath string) error {
+	fmt.Println("🔐 Encrypting file...")
+
+	// Check file info early
+	info, err := os.Stat(inputPath)
 	if err != nil {
-		return nil, fmt.Errorf("could not read public key ring: %w", err)
+		return fmt.Errorf("failed to stat input file: %w", err)
 	}
-	if len(entityList) == 0 {
-		return nil, fmt.Errorf("no public key found in the provided data")
+	if info.Size() == 0 {
+		return fmt.Errorf("input file is empty")
 	}
 
-	// 2. Create a buffer to hold the encrypted data
-	encryptedBuf := new(bytes.Buffer)
-
-	// 3. Create an encryption writer
-	// The `to` argument takes the entities to encrypt for. `signed` can be nil for no signature.
-	plaintextWriter, err := openpgp.Encrypt(encryptedBuf, entityList, nil, nil, nil)
+	// Open input file for reading
+	inFile, err := os.Open(inputPath)
 	if err != nil {
-		return nil, fmt.Errorf("could not create encryption writer: %w", err)
+		return fmt.Errorf("failed to open input file: %w", err)
 	}
+	defer inFile.Close()
 
-	// 4. Write the plaintext to the encryption writer
-	_, err = plaintextWriter.Write(plaintext)
+	// Create output file for writing encrypted data
+	outFile, err := os.Create(outputPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to write plaintext: %w", err)
+		return fmt.Errorf("failed to create encrypted file: %w", err)
 	}
+	defer outFile.Close()
 
-	// 5. IMPORTANT: Close the writer to finalize the encryption
-	err = plaintextWriter.Close()
+	// Load public key
+	keyRing, err := openpgp.ReadArmoredKeyRing(bytes.NewReader(publicKeyBytes))
 	if err != nil {
-		return nil, fmt.Errorf("failed to close encryption writer: %w", err)
+		return fmt.Errorf("failed to read public key ring: %w", err)
+	}
+	if len(keyRing) == 0 {
+		return fmt.Errorf("no keys found in public key ring")
 	}
 
-	return encryptedBuf.Bytes(), nil
+	// Create encryption writer
+	encryptWriter, err := openpgp.Encrypt(outFile, keyRing, nil, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create encryption writer: %w", err)
+	}
+
+	// Stream file into encryption writer
+	if _, err := io.Copy(encryptWriter, inFile); err != nil {
+		return fmt.Errorf("failed to encrypt input file: %w", err)
+	}
+
+	// Close the writer to finalize encryption
+	if err := encryptWriter.Close(); err != nil {
+		return fmt.Errorf("failed to finalize encryption: %w", err)
+	}
+
+	fmt.Println("✅ Encryption complete:", outputPath)
+	return nil
 }

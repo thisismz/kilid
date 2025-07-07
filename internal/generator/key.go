@@ -1,9 +1,11 @@
 package generator
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/ProtonMail/go-crypto/openpgp"
 	"github.com/ProtonMail/go-crypto/openpgp/armor"
@@ -75,7 +77,7 @@ func GeneratePGPKeyFromSeed(name, email string, seed []byte) (*openpgp.Entity, e
 }
 
 // saveKeys function remains the same
-func SaveKeys(entity *openpgp.Entity) error {
+func SaveKeys(entity *openpgp.Entity, outputDir string) error {
 	publicKeyFile, err := os.Create("public.asc")
 	if err != nil {
 		return fmt.Errorf("error creating public key file: %w", err)
@@ -112,4 +114,95 @@ func SaveKeys(entity *openpgp.Entity) error {
 	fmt.Println("✅ Private key saved to private.asc")
 
 	return nil
+}
+
+// saveMnemonicToFile saves the mnemonic seed phrase to a local file
+func SaveMnemonicToFile(mnemonic, outputDir string) error {
+	// Create output directory if it doesn't exist
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory: %w", err)
+	}
+
+	// Create the file path
+	filePath := filepath.Join(outputDir, "mnemonic.txt")
+
+	// Create the file with restricted permissions (read/write for owner only)
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return fmt.Errorf("failed to create mnemonic file: %w", err)
+	}
+	defer file.Close()
+
+	// Write the mnemonic to the file
+	content := fmt.Sprintf("Mnemonic Seed Phrase\n===================\n\n%s\n\n⚠️  IMPORTANT: Keep this file secure and do not share it with anyone!\n", mnemonic)
+	if _, err := file.WriteString(content); err != nil {
+		return fmt.Errorf("failed to write mnemonic to file: %w", err)
+	}
+
+	fmt.Printf("💾 Mnemonic saved to: %s\n", filePath)
+	return nil
+}
+
+// GetKeysAsStrings returns the public and private keys as armored strings
+func GetKeysAsStrings(entity *openpgp.Entity) (publicKey string, privateKey string, err error) {
+	// Get public key as string
+	publicKeyBuffer := &bytes.Buffer{}
+	pubKeyWriter, err := armor.Encode(publicKeyBuffer, openpgp.PublicKeyType, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("error creating armored public key writer: %w", err)
+	}
+
+	err = entity.Serialize(pubKeyWriter)
+	if err != nil {
+		return "", "", fmt.Errorf("error serializing public key: %w", err)
+	}
+	pubKeyWriter.Close()
+	publicKey = publicKeyBuffer.String()
+
+	// Get private key as string
+	privateKeyBuffer := &bytes.Buffer{}
+	privKeyWriter, err := armor.Encode(privateKeyBuffer, openpgp.PrivateKeyType, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("error creating armored private key writer: %w", err)
+	}
+
+	err = entity.SerializePrivate(privKeyWriter, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("error serializing private key: %w", err)
+	}
+	privKeyWriter.Close()
+	privateKey = privateKeyBuffer.String()
+
+	return publicKey, privateKey, nil
+}
+func GetKeysAsBytes(entity *openpgp.Entity) (publicKey []byte, privateKey []byte, err error) {
+	// Get public key as string
+	publicKeyBuffer := &bytes.Buffer{}
+	pubKeyWriter, err := armor.Encode(publicKeyBuffer, openpgp.PublicKeyType, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error creating armored public key writer: %w", err)
+	}
+
+	err = entity.Serialize(pubKeyWriter)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error serializing public key: %w", err)
+	}
+	pubKeyWriter.Close()
+	publicKey = publicKeyBuffer.Bytes()
+
+	// Get private key as string
+	privateKeyBuffer := &bytes.Buffer{}
+	privKeyWriter, err := armor.Encode(privateKeyBuffer, openpgp.PrivateKeyType, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error creating armored private key writer: %w", err)
+	}
+
+	err = entity.SerializePrivate(privKeyWriter, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error serializing private key: %w", err)
+	}
+	privKeyWriter.Close()
+	privateKey = privateKeyBuffer.Bytes()
+
+	return publicKey, privateKey, nil
 }

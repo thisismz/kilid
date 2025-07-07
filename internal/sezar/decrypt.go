@@ -4,45 +4,50 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/ProtonMail/go-crypto/openpgp"
 )
 
-// decryptBytes takes an armored private key and ciphertext,
-// returning the decrypted plaintext.
-func DecryptBytes(privateKeyBytes []byte, ciphertext []byte) ([]byte, error) {
-	// 1. Read the private key
-	entityList, err := openpgp.ReadArmoredKeyRing(bytes.NewReader(privateKeyBytes))
+func DecryptBytes(privateKeyBytes []byte, inputPath string, outputPath string) error {
+	fmt.Println("🔓 Decrypting file...")
+
+	// 1. Load encrypted file
+	encryptedData, err := os.ReadFile(inputPath)
 	if err != nil {
-		return nil, fmt.Errorf("could not read private key ring: %w", err)
+		return fmt.Errorf("failed to read encrypted file: %w", err)
 	}
-	if len(entityList) == 0 {
-		return nil, fmt.Errorf("no private key found in the provided data")
+	if len(encryptedData) == 0 {
+		return fmt.Errorf("encrypted file is empty")
 	}
 
-	// NOTE: Our private key is not password-protected. If it were, we would need to
-	// call entity.PrivateKey.Decrypt(passphrase) here for each entity.
-
-	// 2. Create a ciphertext reader
-	ciphertextReader := bytes.NewReader(ciphertext)
-
-	// 3. Decrypt the message
-	// The keyring holds the private keys that can be used for decryption.
-	md, err := openpgp.ReadMessage(ciphertextReader, entityList, nil, nil)
+	// 2. Parse private key ring
+	keyRing, err := openpgp.ReadArmoredKeyRing(bytes.NewReader(privateKeyBytes))
 	if err != nil {
-		return nil, fmt.Errorf("could not read PGP message: %w", err)
+		return fmt.Errorf("failed to read private key ring: %w", err)
+	}
+	if len(keyRing) == 0 {
+		return fmt.Errorf("no keys found in private key ring")
 	}
 
-	// 4. Read the decrypted plaintext
+	// 3. Decrypt message
+	md, err := openpgp.ReadMessage(bytes.NewReader(encryptedData), keyRing, nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to decrypt message: %w", err)
+	}
 	plaintext, err := io.ReadAll(md.UnverifiedBody)
 	if err != nil {
-		return nil, fmt.Errorf("could not read decrypted plaintext: %w", err)
+		return fmt.Errorf("failed to read decrypted content: %w", err)
 	}
-
-	// Check for signature errors, though we didn't sign in this example
 	if md.SignatureError != nil {
-		return nil, fmt.Errorf("signature error on PGP message: %w", md.SignatureError)
+		return fmt.Errorf("PGP signature verification failed: %w", md.SignatureError)
 	}
 
-	return plaintext, nil
+	// 4. Write decrypted content
+	if err := os.WriteFile(outputPath, plaintext, 0644); err != nil {
+		return fmt.Errorf("failed to write decrypted file: %w", err)
+	}
+
+	fmt.Println("✅ Decryption complete:", outputPath)
+	return nil
 }
